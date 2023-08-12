@@ -8,19 +8,32 @@ go get github.com/alirasoli/go-phpencryption
 ```
 
 ```go
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/alirasoli/go-phpencryption"
+)
+
 const encryptionKey = "key"
 const data = "datatoencrypt"
 
 func main() {
-	p := NewPHPEncryption([]byte(encryptionKey))
+	p := phpencryption.NewPHPEncryption([]byte(encryptionKey))
+	
 	encrypted, err := p.Encrypt([]byte(data))
 	if err != nil {
 		log.Fatal(err)
 	}
+	fmt.Println(encrypted)
 
 	decrypted, err := p.Decrypt(encrypted)
 	if err != nil {
 		log.Fatal(err)
 	}
+	fmt.Println(string(decrypted))
 }
+
 ```
