@@ -1,5 +1,5 @@
 # go-phpencryption
-This package implements https://github.com/defuse/php-encryption which is used in league/oauth2-server in PHP.
+This is go implementation of https://github.com/defuse/php-encryption which is used in league/oauth2-server in PHP/Symfony.
 
 ## How to use
 Add the package to your project:
