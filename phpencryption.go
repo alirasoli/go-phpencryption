@@ -3,6 +3,7 @@ package phpencryption
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -37,11 +38,6 @@ func (e PHPEncryption) Encrypt(data []byte) (string, error) {
 		return "", err
 	}
 
-	mac := make([]byte, macByteSize)
-	if _, err := io.ReadFull(rand.Reader, mac); err != nil {
-		return "", err
-	}
-
 	key := getEncryptionKey(e.encryptionKey, salt)
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -63,10 +59,20 @@ func (e PHPEncryption) Encrypt(data []byte) (string, error) {
 		panic(err)
 	}
 
+	var messageMAC []byte
+	messageMAC = append(messageMAC, header...)
+	messageMAC = append(messageMAC, salt...)
+	messageMAC = append(messageMAC, iv...)
+	messageMAC = append(messageMAC, ciphertext...)
+
+	m := hmac.New(sha256.New, getAuthenticationKey(e.encryptionKey, salt))
+	m.Write(messageMAC)
+	expectedMAC := m.Sum(nil)
+
 	ciphertextWithHeader := append(header, salt...)
 	ciphertextWithHeader = append(ciphertextWithHeader, iv...)
 	ciphertextWithHeader = append(ciphertextWithHeader, ciphertext...)
-	ciphertextWithHeader = append(ciphertextWithHeader, mac...)
+	ciphertextWithHeader = append(ciphertextWithHeader, expectedMAC...)
 
 	ciphertextHex := hex.EncodeToString(ciphertextWithHeader)
 	return ciphertextHex, nil
@@ -82,9 +88,20 @@ func (e PHPEncryption) Decrypt(data string) ([]byte, error) {
 		return nil, err
 	}
 
+	header := ciphertext[:headerVersionSize]
 	salt := ciphertext[headerVersionSize : headerVersionSize+saltByteSize]
 	iv := ciphertext[headerVersionSize+saltByteSize : headerVersionSize+saltByteSize+blockByteSize]
 	encrypted := ciphertext[headerVersionSize+saltByteSize+blockByteSize : headerVersionSize+saltByteSize+blockByteSize+len(ciphertext)-macByteSize-saltByteSize-blockByteSize-headerVersionSize]
+	mac := ciphertext[len(ciphertext)-macByteSize:]
+
+	var m []byte
+	m = append(m, header...)
+	m = append(m, salt...)
+	m = append(m, iv...)
+	m = append(m, encrypted...)
+	if !verifyHMAC(mac, m, getAuthenticationKey(e.encryptionKey, salt)) {
+		return nil, errors.New("hmac")
+	}
 
 	key := getEncryptionKey(e.encryptionKey, salt)
 	block, err := aes.NewCipher(key)
@@ -115,4 +132,30 @@ func getEncryptionKey(secret []byte, salt []byte) []byte {
 		panic(err)
 	}
 	return key
+}
+
+func getAuthenticationKey(secret []byte, salt []byte) []byte {
+	hash := sha256.New
+
+	h := sha256.New()
+	h.Write(secret)
+	prehash := h.Sum(nil)
+
+	prekey := pbkdf2.Key(prehash, salt, 100_000, 32, hash)
+
+	const info = "DefusePHP|V2|KeyForAuthentication"
+	hkdf := hkdf.New(hash, prekey, salt, []byte(info))
+
+	key := make([]byte, 32)
+	if _, err := io.ReadFull(hkdf, key); err != nil {
+		panic(err)
+	}
+	return key
+}
+
+func verifyHMAC(messageMAC []byte, message []byte, key []byte) bool {
+	mac := hmac.New(sha256.New, key)
+	mac.Write(message)
+	expectedMAC := mac.Sum(nil)
+	return hmac.Equal(messageMAC, expectedMAC)
 }
